@@ -3,9 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define SHA256_BLOCK_SIZE 64    // 512 bit
+#include "sha256.h"
 
-typedef uint8_t sha256_block[SHA256_BLOCK_SIZE];
 
 // H constants, the first 32 bits of the fractional part of the square root
 // of the first 8 prime numbers
@@ -189,16 +188,5 @@ int sha256_hash(uint8_t *out, const uint8_t *input, const uint64_t len)
     
     memcpy(out, hash, 32);
     free(blocks);
-    return 0;
-}
-
-int main()
-{
-    char *str = "hello worldaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbzzzzzzzz";
-    char hash[32];
-    sha256_hash(hash, str, strlen(str));
-    print_hex((uint8_t *) hash, 32);
-    printf("\n");
-    
     return 0;
 }
