@@ -89,7 +89,7 @@ static uint32_t rotr32(uint32_t val, uint8_t n)
 static unsigned int calculate_block_len(size_t len)
 {
     // Go up to the next multiple of SHA256_BLOCK_SIZE
-    len += 9;   // 1 padding byte + 8 byte length
+    len += 8;   // Account for the 8 byte length we will append at the end
     return len-(len%SHA256_BLOCK_SIZE)+SHA256_BLOCK_SIZE;
 }
 
@@ -97,22 +97,15 @@ static void create_padded_blocks(const uint8_t *input, const uint64_t len,
                 uint8_t **output, uint64_t *output_len)
 {
     // Calculate whole block len + allocate
-    //unsigned int zero_pad_len = calculate_zero_padding_len(len+1);
     *output_len = calculate_block_len(len);
     *output = calloc(1, *output_len);
-    //printf("%d\n", *output_len);
     memcpy(*output, input, len);
     
     // Add padding byte
     (*output)[len] = 0b10000000;
     
-    // TODO Handeled by calloc
-    // Add zero padding
-    //bzero((*output)+len+1, zero_pad_len);
-    
     // Add 64 bit big endian message length (Length is counted in bits)
     *((uint64_t *) (*output+((*output_len)-8))) = switch_endian_64(len*8);
-    //*output_len += 8;
 }
 
 static void process_block(uint32_t *hash, sha256_block *block)
@@ -184,11 +177,8 @@ int sha256_hash(uint8_t *out, const uint8_t *input, const uint64_t len)
     
     // Process each block
     size_t block_count = blocks_len / SHA256_BLOCK_SIZE;
-    printf("block count %d\n", block_count);
     sha256_block *block = (sha256_block *) blocks;
     for(int i=0; i<block_count; ++i) {
-        print_bin32(block+i, 16);
-        printf("\n");
         process_block(hash, block+i);
     }
     
@@ -204,9 +194,7 @@ int sha256_hash(uint8_t *out, const uint8_t *input, const uint64_t len)
 
 int main()
 {
-    // TODO BUG: if str > 64, the block_padding calculator does not work
-    // and the hash is wrong
-    char *str = "hello worldaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    char *str = "hello worldaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbzzzzzzzz";
     char hash[32];
     sha256_hash(hash, str, strlen(str));
     print_hex((uint8_t *) hash, 32);
