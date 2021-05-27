@@ -86,40 +86,33 @@ static uint32_t rotr32(uint32_t val, uint8_t n)
     return (val >> n) | (dropped << (32-n));
 }
 
-static unsigned int calculate_zero_padding_len(size_t len)
+static unsigned int calculate_block_len(size_t len)
 {
-    // Go up to the next multiple of SHA256_BLOCK_SIZE - 8, we will
-    // append a 64 bit message_length at the end, making the full padded message
-    // a multiple of 64
-    unsigned int base = SHA256_BLOCK_SIZE - 8;
-    if(len%base == 0) return 0;
-    return base-(len%base);
+    // Go up to the next multiple of SHA256_BLOCK_SIZE
+    len += 9;   // 1 padding byte + 8 byte length
+    return len-(len%SHA256_BLOCK_SIZE)+SHA256_BLOCK_SIZE;
 }
 
 static void create_padded_blocks(const uint8_t *input, const uint64_t len,
                 uint8_t **output, uint64_t *output_len)
 {
-    //uint64_t blocks_len = len;
-    *output_len = len;
-    *output = malloc(*output_len);
-    memcpy(*output, input, *output_len);
+    // Calculate whole block len + allocate
+    //unsigned int zero_pad_len = calculate_zero_padding_len(len+1);
+    *output_len = calculate_block_len(len);
+    *output = calloc(1, *output_len);
+    //printf("%d\n", *output_len);
+    memcpy(*output, input, len);
     
     // Add padding byte
-    (*output_len)++;
-    *output = realloc(*output, *output_len);
-    (*output)[(*output_len)-1] = 0b10000000;
+    (*output)[len] = 0b10000000;
     
+    // TODO Handeled by calloc
     // Add zero padding
-    unsigned int zero_padd_len = calculate_zero_padding_len(*output_len);
-    *output = realloc(*output, *output_len + zero_padd_len);
-    bzero(*output+(*output_len), zero_padd_len);
-    *output_len += zero_padd_len;
+    //bzero((*output)+len+1, zero_pad_len);
     
     // Add 64 bit big endian message length (Length is counted in bits)
-    *output = realloc(*output, *output_len + 8);
-    bzero(*output+(*output_len), 8);
-    *((uint64_t *) (*output+(*output_len))) = switch_endian_64(len*8);
-    *output_len += 8;
+    *((uint64_t *) (*output+((*output_len)-8))) = switch_endian_64(len*8);
+    //*output_len += 8;
 }
 
 static void process_block(uint32_t *hash, sha256_block *block)
@@ -137,7 +130,7 @@ static void process_block(uint32_t *hash, sha256_block *block)
     for(int i=16; i<64; ++i) {
         uint32_t s0 = rotr32(w[i-15], 7) ^ rotr32(w[i-15], 18) ^ (w[i-15] >> 3);
         uint32_t s1 = rotr32(w[i-2], 17) ^ rotr32(w[i-2], 19) ^ (w[i-2] >> 10);
-        w[i] = (w[i-16] + s0 + w[i-7] + s1) % 0x100000000;
+        w[i] = w[i-16] + s0 + w[i-7] + s1;
     }
     
     // Compression
@@ -153,29 +146,29 @@ static void process_block(uint32_t *hash, sha256_block *block)
     for(int i=0; i<64; ++i) {
         uint32_t s1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
         uint32_t ch = (e & f) ^ ((~e) & g);
-        uint32_t temp1 = (h + s1 + ch + K[i] + w[i]) % 0x100000000;
+        uint32_t temp1 = h + s1 + ch + K[i] + w[i];
         uint32_t s0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
         uint32_t maj = (a&b) ^ (a&c) ^ (b&c);
-        uint32_t temp2 = (s0 + maj) % 0x100000000;
+        uint32_t temp2 = s0 + maj;
         h = g;
         g = f;
         f = e;
-        e = (d+temp1) % 0x100000000;
+        e = d+temp1;
         d = c;
         c = b;
         b = a;
-        a = (temp1+temp2) % 0x100000000;
+        a = temp1+temp2;
     }
     
     // Update hash
-    hash[0] = (hash[0] + a) % 0x100000000;
-    hash[1] = (hash[1] + b) % 0x100000000;
-    hash[2] = (hash[2] + c) % 0x100000000;
-    hash[3] = (hash[3] + d) % 0x100000000;
-    hash[4] = (hash[4] + e) % 0x100000000;
-    hash[5] = (hash[5] + f) % 0x100000000;
-    hash[6] = (hash[6] + g) % 0x100000000;
-    hash[7] = (hash[7] + h) % 0x100000000;
+    hash[0] = hash[0] + a;
+    hash[1] = hash[1] + b;
+    hash[2] = hash[2] + c;
+    hash[3] = hash[3] + d;
+    hash[4] = hash[4] + e;
+    hash[5] = hash[5] + f;
+    hash[6] = hash[6] + g;
+    hash[7] = hash[7] + h;
 }
 
 int sha256_hash(uint8_t *out, const uint8_t *input, const uint64_t len)
@@ -191,8 +184,11 @@ int sha256_hash(uint8_t *out, const uint8_t *input, const uint64_t len)
     
     // Process each block
     size_t block_count = blocks_len / SHA256_BLOCK_SIZE;
+    printf("block count %d\n", block_count);
     sha256_block *block = (sha256_block *) blocks;
     for(int i=0; i<block_count; ++i) {
+        print_bin32(block+i, 16);
+        printf("\n");
         process_block(hash, block+i);
     }
     
@@ -201,14 +197,16 @@ int sha256_hash(uint8_t *out, const uint8_t *input, const uint64_t len)
         hash[i] = switch_endian_32(hash[i]);
     }
     
-    memcpy(out, hash, 32);  // TODO Maybe Use out for intermediate steps
+    memcpy(out, hash, 32);
     free(blocks);
     return 0;
 }
 
 int main()
 {
-    char *str = "hello world";
+    // TODO BUG: if str > 64, the block_padding calculator does not work
+    // and the hash is wrong
+    char *str = "hello worldaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     char hash[32];
     sha256_hash(hash, str, strlen(str));
     print_hex((uint8_t *) hash, 32);
